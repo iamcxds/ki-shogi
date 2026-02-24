@@ -168,6 +168,12 @@ function handleKey(key) {
 // === Menu ===
 
 function onMenu(key) {
+  if (key === KEY.ESC && state.menuStep > 1) {
+    state.menuStep--;
+    if (state.menuStep === 2 && !state._wantAI) state.menuStep = 1;
+    redraw();
+    return;
+  }
   if (state.menuStep === 1) {
     // 选择对手
     if (key === KEY.ONE) state._wantAI = false;
