@@ -26,11 +26,45 @@ const SHOW_CURSOR = `${ESC}?25h`;
 const CELL_W = 2; // terminal columns per cell
 
 // Get terminal display width (CJK chars = 2 columns)
+function isWide(code) {
+  if (code >= 0x1100 && code <= 0x115F) return true;   // Hangul Jamo
+  if (code >= 0x2E80 && code <= 0x303E) return true;   // CJK Radicals, Kangxi, Symbols
+  if (code >= 0x3040 && code <= 0x33BF) return true;   // Hiragana, Katakana, Bopomofo, CJK Compat
+  if (code >= 0x3400 && code <= 0x4DBF) return true;   // CJK Extension A
+  if (code >= 0x4E00 && code <= 0x9FFF) return true;   // CJK Unified Ideographs
+  if (code >= 0xAC00 && code <= 0xD7AF) return true;   // Hangul Syllables
+  if (code >= 0xF900 && code <= 0xFAFF) return true;   // CJK Compat Ideographs
+  if (code >= 0xFE30 && code <= 0xFE6F) return true;   // CJK Compat Forms, Small Forms
+  if (code >= 0xFF01 && code <= 0xFF60) return true;   // Fullwidth Forms
+  if (code >= 0xFFE0 && code <= 0xFFE6) return true;   // Fullwidth Signs
+  return false;
+}
+
 function visLen(s) {
   const stripped = s.replace(/\x1b\[[^m]*m/g, '');
   let w = 0;
-  for (const ch of stripped) w += ch.charCodeAt(0) > 0xff ? 2 : 1;
+  for (const ch of stripped) w += isWide(ch.charCodeAt(0)) ? 2 : 1;
   return w;
+}
+
+// Merge panel on the LEFT of lines within a specific range
+function mergeLeftPanel(lines, panel, startIdx, endIdx) {
+  if (panel.length === 0) return 0;
+  let maxW = 0;
+  for (const s of panel) maxW = Math.max(maxW, visLen(s));
+  const colW = maxW + 2;
+  const padStr = ' '.repeat(colW);
+  for (let i = startIdx; i <= endIdx && i < lines.length; i++) {
+    const pi = i - startIdx;
+    if (pi < panel.length) {
+      const pLine = panel[pi];
+      const gap = colW - visLen(pLine);
+      lines[i] = pLine + ' '.repeat(gap) + lines[i];
+    } else {
+      lines[i] = padStr + lines[i];
+    }
+  }
+  return colW;
 }
 
 // Merge sidebar lines onto existing lines starting at startIdx
@@ -107,14 +141,23 @@ function render(state) {
     }
   }
 
-  // Merge sidebar (hints + log) onto lines at grid position
+  // Merge hints on the right, then log panel further right
   if (gridInfo && gridInfo.gridWidth > 0) {
+    const sideStart = gridInfo.boardStart;
     const sidebar = buildSidebar(state);
+    let gw = gridInfo.gridWidth;
     if (sidebar.length > 0) {
-      let gw = gridInfo.gridWidth;
-      const end = Math.min(lines.length, gridInfo.sidebarStart + sidebar.length);
-      for (let i = gridInfo.sidebarStart; i < end; i++) gw = Math.max(gw, visLen(lines[i]));
-      mergeSidebar(lines, sidebar, gridInfo.sidebarStart, gw);
+      const end = Math.min(lines.length, sideStart + sidebar.length);
+      for (let i = sideStart; i < end; i++) gw = Math.max(gw, visLen(lines[i]));
+      mergeSidebar(lines, sidebar, sideStart, gw);
+    }
+    // Log panel to the right of hints
+    const logPanel = buildLogPanel(state);
+    if (logPanel.length > 0) {
+      let gw2 = gw;
+      const logEnd = Math.min(lines.length, sideStart + logPanel.length);
+      for (let i = sideStart; i < logEnd; i++) gw2 = Math.max(gw2, visLen(lines[i]));
+      mergeSidebar(lines, logPanel, sideStart, gw2);
     }
   }
 
@@ -128,20 +171,24 @@ function render(state) {
   process.stdout.write(CLEAR + HIDE_CURSOR + lines.join('\n') + '\n');
 }
 
-// Build sidebar content: hints + log
-function buildSidebar(state) {
-  const sidebar = getHintForState(state);
+// Build log panel for right side of board (after hints)
+function buildLogPanel(state) {
+  const panel = [];
   if (state.moveLog && state.moveLog.length > 0) {
-    if (sidebar.length > 0) sidebar.push('');
-    sidebar.push(`${FG_GRAY}── ${t('log_title')} ──${RESET}`);
+    panel.push(`${FG_GRAY}── ${t('log_title')} ──${RESET}`);
     const recent = state.moveLog.slice(-8);
     for (const entry of recent) {
       const color = entry.owner === BLACK ? FG_WHITE : FG_CYAN;
       const ow = entry.owner === BLACK ? t('black_short') : t('white_short');
-      sidebar.push(`${FG_GRAY}${entry.num}.${RESET} ${color}${BOLD}${ow}${RESET} ${entry.text}`);
+      panel.push(`${FG_GRAY}${entry.num}.${RESET} ${color}${BOLD}${ow}${RESET} ${entry.text}`);
     }
   }
-  return sidebar;
+  return panel;
+}
+
+// Build right sidebar: hints only
+function buildSidebar(state) {
+  return getHintForState(state);
 }
 
 function renderMenu(state, lines) {
@@ -162,9 +209,10 @@ function renderMenu(state, lines) {
 function renderBoard(state, lines) {
   const onBoard = state.pieces.filter(p => p.onBoard);
   if (onBoard.length === 0 && state.mode === MODE.SETUP_BLACK_GYOKU) {
+    const bStart = lines.length;
     const s = renderGrid(state, lines, state.cursor.x - 3, state.cursor.x + 3,
                state.cursor.y - 3, state.cursor.y + 3);
-    return { gridWidth: s.gridWidth, sidebarStart: s.startLine + 1 };
+    return { gridWidth: s.gridWidth, sidebarStart: s.startLine + 1, boardStart: bStart, boardEnd: lines.length - 1 };
   }
 
   let minX = state.cursor.x, maxX = state.cursor.x;
@@ -179,8 +227,9 @@ function renderBoard(state, lines) {
   const s = renderGrid(state, lines, minX - 2, maxX + 2, minY - 2, maxY + 2);
   lines.push('');
   renderHand(state, lines, BLACK);
-  const gw = Math.max(s.gridWidth, visLen(lines[whIdx]), visLen(lines[lines.length - 1]));
-  return { gridWidth: gw, sidebarStart: s.startLine + 1 };
+  const bhIdx = lines.length - 1;
+  const gw = Math.max(s.gridWidth, visLen(lines[whIdx]), visLen(lines[bhIdx]));
+  return { gridWidth: gw, sidebarStart: s.startLine + 1, boardStart: whIdx, boardEnd: bhIdx };
 }
 
 function renderGrid(state, lines, x1, x2, y1, y2) {
@@ -342,9 +391,12 @@ function renderLogBrowse(state, lines) {
 
   const x1 = minX - 2, x2 = maxX + 2, y1 = minY - 2, y2 = maxY + 2;
 
-  // White hand above board
+  // White hand
+  const boardStart = lines.length;
   renderSnapHand(snap, lines, WHITE);
   lines.push('');
+
+  // Grid header + rows
   const startLine = lines.length;
   let header = '    ';
   for (let x = x1; x <= x2; x++) header += String(x).padStart(2).padEnd(CELL_W);
@@ -365,31 +417,43 @@ function renderLogBrowse(state, lines) {
     lines.push(row);
   }
 
-  // Sidebar: log entries with highlight
-  const sidebar = [];
-  sidebar.push(`${FG_GRAY}── ${t('log_title')} ──${RESET}`);
-  const start = Math.max(0, state.logIndex - 4);
-  const end = Math.min(state.moveLog.length, start + 10);
-  for (let i = start; i < end; i++) {
+  // Black hand
+  lines.push('');
+  renderSnapHand(snap, lines, BLACK);
+  const boardEnd = lines.length - 1;
+
+  const gridWidth = 6 + (x2 - x1 + 1) * CELL_W;
+
+  // Build log panel (left column)
+  const logPanel = [];
+  logPanel.push(`${FG_GRAY}── ${t('log_title')} ──${RESET}`);
+  const boardHeight = boardEnd - boardStart + 1;
+  const VISIBLE = Math.min(12, Math.max(0, boardHeight - 2));
+  const total = state.moveLog.length;
+  let wStart = Math.max(0, state.logIndex - Math.floor(VISIBLE / 2));
+  wStart = Math.min(wStart, Math.max(0, total - VISIBLE));
+  const wEnd = Math.min(total, wStart + VISIBLE);
+  for (let i = wStart; i < wEnd; i++) {
     const e = state.moveLog[i];
     const color = e.owner === BLACK ? FG_WHITE : FG_CYAN;
     const ow = e.owner === BLACK ? t('black_short') : t('white_short');
-    const prefix = i === state.logIndex ? `${BG_YELLOW}${FG_BLACK}` : '';
-    sidebar.push(`${prefix}${FG_GRAY}${e.num}.${RESET} ${prefix}${color}${BOLD}${ow}${RESET} ${prefix}${e.text}${RESET}`);
+    if (i === state.logIndex) {
+      logPanel.push(`${BG_YELLOW}${FG_BLACK}${e.num}. ${ow} ${e.text}${RESET}`);
+    } else {
+      logPanel.push(`${FG_GRAY}${e.num}.${RESET} ${color}${BOLD}${ow}${RESET} ${e.text}`);
+    }
   }
 
-  const gridWidth = 6 + (x2 - x1 + 1) * CELL_W;
-  mergeSidebar(lines, sidebar, startLine + 1, gridWidth);
+  // Merge log on left of board area
+  const leftW = mergeLeftPanel(lines, logPanel, boardStart, boardEnd);
 
-  // Black hand below board (after sidebar merge to avoid padding)
-  lines.push('');
-  renderSnapHand(snap, lines, BLACK);
-
-  // Move hint below board
+  // Merge hint on right
   if (entry.face) {
-    lines.push('');
     const hint = getMoveHintLines(entry.face, entry.owner);
-    for (const h of hint) lines.push(`  ${h}`);
+    let gw = gridWidth + leftW;
+    const end = Math.min(lines.length, boardStart + hint.length);
+    for (let i = boardStart; i < end; i++) gw = Math.max(gw, visLen(lines[i]));
+    mergeSidebar(lines, hint, boardStart, gw);
   }
 }
 

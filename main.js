@@ -49,6 +49,9 @@ function quit() {
 function endTurn() {
   // Handle stranding
   handleStranding(state);
+  // Update last log snapshot to reflect stranding captures
+  const lastLog = state.moveLog[state.moveLog.length - 1];
+  if (lastLog) lastLog.snapshot = state.pieces.map(p => ({ id: p.id, owner: p.owner, cube: p.cube, face: p.face, x: p.x, y: p.y }));
   state.switchTurn();
   state.message = '';
 
@@ -244,6 +247,7 @@ function onSetupBlackGyoku(key) {
     g.x = state.cursor.x;
     g.y = state.cursor.y;
     g.face = 'Gyoku';
+    logMove(BLACK, `${fk('Gyoku')}↓(${g.x},${g.y})`, 'Gyoku', null, {x: g.x, y: g.y});
     state.mode = MODE.SETUP_WHITE_GYOKU;
     // Set cursor to valid white position, prefer directly above (max y)
     const positions = getWhiteGyokuPositions(state);
@@ -274,6 +278,7 @@ function onSetupWhiteGyoku(key) {
       g.x = state.cursor.x;
       g.y = state.cursor.y;
       g.face = 'Gyoku';
+      logMove(WHITE, `${fk('Gyoku')}↓(${g.x},${g.y})`, 'Gyoku', null, {x: g.x, y: g.y});
       state.legalMoves = [];
       state.turn = BLACK;
       state.mode = MODE.BOARD;
@@ -547,6 +552,7 @@ function onPromote(key) {
 function aiSetupBlackGyoku() {
   const g = state.getGyoku(BLACK);
   g.x = 0; g.y = 0; g.face = 'Gyoku';
+  logMove(BLACK, `${fk('Gyoku')}↓(${g.x},${g.y})`, 'Gyoku', null, {x: g.x, y: g.y});
   state.mode = MODE.SETUP_WHITE_GYOKU;
   const positions = getWhiteGyokuPositions(state);
   if (positions.length > 0) {
@@ -565,6 +571,7 @@ function aiSetupWhiteGyoku() {
   const pick = positions[Math.floor(Math.random() * positions.length)];
   const g = state.getGyoku(WHITE);
   g.x = pick.x; g.y = pick.y; g.face = 'Gyoku';
+  logMove(WHITE, `${fk('Gyoku')}↓(${g.x},${g.y})`, 'Gyoku', null, {x: g.x, y: g.y});
   state.legalMoves = [];
   state.turn = BLACK;
   state.mode = MODE.BOARD;
@@ -713,15 +720,22 @@ function aiRepetitionPenalty(action, owner) {
 
   const hist = state.positionHistory.get(hash);
   if (!hist || hist.length === 0) return 0;
+
+  // Perpetual check penalties (always avoid — it's a loss)
+  if (hist.length >= 3 && hist.every(h => h.inCheck) && wouldCheck) return -5000;
+  if (hist.length >= 2 && hist.every(h => h.inCheck) && wouldCheck) return -3000;
+  if (hist.length >= 1 && hist.every(h => h.inCheck) && wouldCheck) return -800;
+
+  // Sennichite draw: adjust based on whether AI is winning or losing
+  const eval_ = evaluate(state, owner);
   if (hist.length >= 3) {
-    if (hist.every(h => h.inCheck) && wouldCheck) return -5000; // perpetual check = lose
-    return -2000; // sennichite draw
+    // 4th repetition = forced draw
+    return eval_ > 0 ? -2000 : 2000;
   }
   if (hist.length >= 2) {
-    if (hist.every(h => h.inCheck) && wouldCheck) return -500;
-    return -100;
+    return eval_ > 0 ? -500 : 500;
   }
-  return 0;
+  return eval_ > 0 ? -50 : 30;
 }
 
 function aiMove() {
