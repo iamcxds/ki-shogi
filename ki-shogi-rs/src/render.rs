@@ -1,10 +1,10 @@
 // Ki Shogi - ANSI terminal renderer
 
-use std::io::{self, Write};
-use std::collections::HashMap;
-use crate::types::{Owner, Cube, Face, MoveMode, get_move_components};
+use crate::lang::{get_tutorial_pages, t, Ansi};
 use crate::state::{GameState, Mode, PieceSnapshot};
-use crate::lang::{t, Ansi, get_tutorial_pages};
+use crate::types::{get_move_components, Cube, Face, MoveMode, Owner};
+use std::collections::HashMap;
+use std::io::{self, Write};
 
 // ANSI codes
 const RESET: &str = "\x1b[0m";
@@ -39,7 +39,10 @@ fn is_wide(code: u32) -> bool {
 /// Visual width of a string (stripping ANSI codes, CJK = 2 cols)
 fn vis_len(s: &str) -> usize {
     let stripped = strip_ansi(s);
-    stripped.chars().map(|c| if is_wide(c as u32) { 2 } else { 1 }).sum()
+    stripped
+        .chars()
+        .map(|c| if is_wide(c as u32) { 2 } else { 1 })
+        .sum()
 }
 
 fn strip_ansi(s: &str) -> String {
@@ -47,7 +50,9 @@ fn strip_ansi(s: &str) -> String {
     let mut in_esc = false;
     for c in s.chars() {
         if in_esc {
-            if c == 'm' { in_esc = false; }
+            if c == 'm' {
+                in_esc = false;
+            }
         } else if c == '\x1b' {
             in_esc = true;
         } else {
@@ -73,7 +78,9 @@ fn merge_sidebar(lines: &mut Vec<String>, sidebar: &[String], start: usize, grid
 
 /// Merge panel on the LEFT of lines within a range
 fn merge_left_panel(lines: &mut Vec<String>, panel: &[String], start: usize, end: usize) -> usize {
-    if panel.is_empty() { return 0; }
+    if panel.is_empty() {
+        return 0;
+    }
     let max_w = panel.iter().map(|s| vis_len(s)).max().unwrap_or(0);
     let col_w = max_w + 2;
     let pad_str = " ".repeat(col_w);
@@ -94,12 +101,25 @@ struct GridInfo {
     board_start: usize,
 }
 
-fn render_grid(state: &GameState, lines: &mut Vec<String>, x1: i32, x2: i32, y1: i32, y2: i32) -> (usize, usize) {
+fn render_grid(
+    state: &GameState,
+    lines: &mut Vec<String>,
+    x1: i32,
+    x2: i32,
+    y1: i32,
+    y2: i32,
+) -> (usize, usize) {
     let board_map = state.build_board_map();
-    let legal_set: std::collections::HashSet<String> = state.legal_moves.iter()
-        .map(|m| format!("{},{}", m.x, m.y)).collect();
-    let drop_set: std::collections::HashSet<String> = state.drop_targets.iter()
-        .map(|(x, y)| format!("{},{}", x, y)).collect();
+    let legal_set: std::collections::HashSet<String> = state
+        .legal_moves
+        .iter()
+        .map(|m| format!("{},{}", m.x, m.y))
+        .collect();
+    let drop_set: std::collections::HashSet<String> = state
+        .drop_targets
+        .iter()
+        .map(|(x, y)| format!("{},{}", x, y))
+        .collect();
 
     let start_line = lines.len();
     let mut header = "    ".to_string();
@@ -112,16 +132,25 @@ fn render_grid(state: &GameState, lines: &mut Vec<String>, x1: i32, x2: i32, y1:
         let mut row = format!("  {}{:>3} {}", FG_GRAY, y, RESET);
         for x in x1..=x2 {
             let key = format!("{},{}", x, y);
-            let face = board_map.get(&key).map(|&i| (state.pieces[i].face, state.pieces[i].owner));
+            let face = board_map
+                .get(&key)
+                .map(|&i| (state.pieces[i].face, state.pieces[i].owner));
             let is_cursor = state.cursor.0 == x && state.cursor.1 == y;
             let is_legal = legal_set.contains(&key);
             let is_drop = drop_set.contains(&key);
             let is_selected = state.selected.map_or(false, |si| {
                 state.pieces[si].x == Some(x) && state.pieces[si].y == Some(y)
             });
-            let is_last_move = state.last_move_from == Some((x, y))
-                || state.last_move_to == Some((x, y));
-            row += &render_cell(face, is_cursor, is_legal, is_drop, is_selected, is_last_move);
+            let is_last_move =
+                state.last_move_from == Some((x, y)) || state.last_move_to == Some((x, y));
+            row += &render_cell(
+                face,
+                is_cursor,
+                is_legal,
+                is_drop,
+                is_selected,
+                is_last_move,
+            );
         }
         lines.push(row);
     }
@@ -130,27 +159,35 @@ fn render_grid(state: &GameState, lines: &mut Vec<String>, x1: i32, x2: i32, y1:
     (grid_width, start_line)
 }
 
-fn render_cell(face: Option<(Face, Owner)>, is_cursor: bool, is_legal: bool, is_drop: bool, is_selected: bool, is_last_move: bool) -> String {
+fn render_cell(
+    face: Option<(Face, Owner)>,
+    is_cursor: bool,
+    is_legal: bool,
+    is_drop: bool,
+    is_selected: bool,
+    is_last_move: bool,
+) -> String {
     let mut bg = "";
     let mut fg = "";
     let mut text = "  ".to_string();
 
     if let Some((f, owner)) = face {
         text = f.kanji().to_string();
-        fg = if owner == Owner::Black { FG_WHITE } else { FG_CYAN };
+        fg = if owner == Owner::Black {
+            FG_WHITE
+        } else {
+            FG_CYAN
+        };
     }
 
     if is_selected {
         bg = BG_BLUE;
     } else if is_cursor {
         bg = BG_YELLOW;
-        if face.is_some() { fg = FG_BLACK; }
     } else if is_legal || is_drop {
         bg = BG_GREEN;
-        if face.is_some() { fg = FG_BLACK; }
     } else if is_last_move {
         bg = BG_BLUE;
-        if face.is_some() { fg = FG_BLACK; }
     }
 
     format!("{}{}{}{}{}", bg, fg, BOLD, text, RESET)
@@ -158,8 +195,16 @@ fn render_cell(face: Option<(Face, Owner)>, is_cursor: bool, is_legal: bool, is_
 
 fn render_hand(state: &GameState, lines: &mut Vec<String>, owner: Owner) {
     let hand = state.hand_pieces_for(owner);
-    let label = if owner == Owner::Black { t("black_hand") } else { t("white_hand") };
-    let color = if owner == Owner::Black { FG_WHITE } else { FG_CYAN };
+    let label = if owner == Owner::Black {
+        t("black_hand")
+    } else {
+        t("white_hand")
+    };
+    let color = if owner == Owner::Black {
+        FG_WHITE
+    } else {
+        FG_CYAN
+    };
     let mut s = format!("  {}{}{}:{} ", color, BOLD, label, RESET);
     if hand.is_empty() {
         s += &format!("{}{}{}", FG_GRAY, t("hand_empty"), RESET);
@@ -176,10 +221,18 @@ fn render_board(state: &GameState, lines: &mut Vec<String>) -> GridInfo {
     let on_board: Vec<_> = state.pieces.iter().filter(|p| p.on_board()).collect();
     if on_board.is_empty() && state.mode == Mode::SetupBlackGyoku {
         let b_start = lines.len();
-        let (gw, _) = render_grid(state, lines,
-            state.cursor.0 - 3, state.cursor.0 + 3,
-            state.cursor.1 - 3, state.cursor.1 + 3);
-        return GridInfo { grid_width: gw, board_start: b_start };
+        let (gw, _) = render_grid(
+            state,
+            lines,
+            state.cursor.0 - 3,
+            state.cursor.0 + 3,
+            state.cursor.1 - 3,
+            state.cursor.1 + 3,
+        );
+        return GridInfo {
+            grid_width: gw,
+            board_start: b_start,
+        };
     }
 
     let mut min_x = state.cursor.0;
@@ -189,8 +242,10 @@ fn render_board(state: &GameState, lines: &mut Vec<String>) -> GridInfo {
     for p in &on_board {
         let px = p.x.unwrap();
         let py = p.y.unwrap();
-        min_x = min_x.min(px); max_x = max_x.max(px);
-        min_y = min_y.min(py); max_y = max_y.max(py);
+        min_x = min_x.min(px);
+        max_x = max_x.max(px);
+        min_y = min_y.min(py);
+        max_y = max_y.max(py);
     }
 
     let wh_idx = lines.len();
@@ -201,7 +256,10 @@ fn render_board(state: &GameState, lines: &mut Vec<String>) -> GridInfo {
     render_hand(state, lines, Owner::Black);
     let bh_idx = lines.len() - 1;
     let final_gw = gw.max(vis_len(&lines[wh_idx])).max(vis_len(&lines[bh_idx]));
-    GridInfo { grid_width: final_gw, board_start: wh_idx }
+    GridInfo {
+        grid_width: final_gw,
+        board_start: wh_idx,
+    }
 }
 
 fn render_status(state: &GameState, lines: &mut Vec<String>) {
@@ -221,12 +279,28 @@ fn render_status(state: &GameState, lines: &mut Vec<String>) {
         Mode::Board => {
             if state.ai_side.is_ai(state.turn) {
                 if state.paused {
-                    lines.push(format!("  {} {}{}{} {} {}", turn_name, BG_RED, FG_WHITE, BOLD, t("paused"), RESET));
+                    lines.push(format!(
+                        "  {} {}{}{} {} {}",
+                        turn_name,
+                        BG_RED,
+                        FG_WHITE,
+                        BOLD,
+                        t("paused"),
+                        RESET
+                    ));
                 } else {
-                    let elapsed = state.ai_think_start
+                    let elapsed = state
+                        .ai_think_start
                         .map(|t| t.elapsed().as_secs_f32())
                         .unwrap_or(0.0);
-                    lines.push(format!("  {} {}{} ({:.1}s){}", turn_name, FG_YELLOW, t("ai_thinking"), elapsed, RESET));
+                    lines.push(format!(
+                        "  {} {}{} ({:.1}s){}",
+                        turn_name,
+                        FG_YELLOW,
+                        t("ai_thinking"),
+                        elapsed,
+                        RESET
+                    ));
                 }
             } else {
                 lines.push(format!("  {} {}", turn_name, t("your_turn")));
@@ -239,7 +313,14 @@ fn render_status(state: &GameState, lines: &mut Vec<String>) {
     }
 
     if state.in_check {
-        lines.push(format!("  {}{}{} {} {}", BG_RED, FG_WHITE, BOLD, t("check"), RESET));
+        lines.push(format!(
+            "  {}{}{} {} {}",
+            BG_RED,
+            FG_WHITE,
+            BOLD,
+            t("check"),
+            RESET
+        ));
     }
     if !state.message.is_empty() {
         lines.push(format!("  {}{}{}", FG_YELLOW, state.message, RESET));
@@ -248,12 +329,41 @@ fn render_status(state: &GameState, lines: &mut Vec<String>) {
 
 fn render_menu(state: &GameState, lines: &mut Vec<String>) {
     let menus: &[(&str, &[(&str, &str)], &str)] = &[
-        ("choose_opponent", &[("1", "local_2p"), ("2", "ai_battle"), ("3", "tutorial")], "press_123"),
-        ("choose_pieces", &[("1", "basic_set"), ("2", "full_set")], "press_12"),
-        ("choose_diff", &[("1", "diff_easy"), ("2", "diff_medium"), ("3", "diff_hard"), ("4", "diff_very_hard"), ("5", "diff_extreme")], "press_12345"),
-        ("choose_side", &[("1", "play_black"), ("2", "play_white"), ("3", "random"), ("4", "ai_vs_ai")], "press_1234"),
+        (
+            "choose_opponent",
+            &[("1", "local_2p"), ("2", "ai_battle"), ("3", "tutorial")],
+            "press_123",
+        ),
+        (
+            "choose_pieces",
+            &[("1", "basic_set"), ("2", "full_set")],
+            "press_12",
+        ),
+        (
+            "choose_diff",
+            &[
+                ("1", "diff_easy"),
+                ("2", "diff_medium"),
+                ("3", "diff_hard"),
+                ("4", "diff_very_hard"),
+                ("5", "diff_extreme"),
+            ],
+            "press_12345",
+        ),
+        (
+            "choose_side",
+            &[
+                ("1", "play_black"),
+                ("2", "play_white"),
+                ("3", "random"),
+                ("4", "ai_vs_ai"),
+            ],
+            "press_1234",
+        ),
     ];
-    let idx = (state.menu_step as usize).saturating_sub(1).min(menus.len() - 1);
+    let idx = (state.menu_step as usize)
+        .saturating_sub(1)
+        .min(menus.len() - 1);
     let (title, items, hint) = menus[idx];
     lines.push(format!("  {}{}{}", BOLD, t(title), RESET));
     lines.push(String::new());
@@ -265,12 +375,26 @@ fn render_menu(state: &GameState, lines: &mut Vec<String>) {
 }
 
 fn render_hand_select(state: &GameState, lines: &mut Vec<String>) {
-    let turn_name = if state.turn == Owner::Black { t("black_short") } else { t("white_short") };
-    lines.push(format!("  {}{} {}{}", BOLD, turn_name, t("choose_drop"), RESET));
+    let turn_name = if state.turn == Owner::Black {
+        t("black_short")
+    } else {
+        t("white_short")
+    };
+    lines.push(format!(
+        "  {}{} {}{}",
+        BOLD,
+        turn_name,
+        t("choose_drop"),
+        RESET
+    ));
     for (i, &pi) in state.hand_pieces.iter().enumerate() {
         let p = &state.pieces[pi];
         let kanji = p.face.kanji();
-        let marker = if i == state.hand_index { format!("{}{}", BG_YELLOW, FG_BLACK) } else { String::new() };
+        let marker = if i == state.hand_index {
+            format!("{}{}", BG_YELLOW, FG_BLACK)
+        } else {
+            String::new()
+        };
         lines.push(format!("  {} {} {:?} {}", marker, kanji, p.face, RESET));
     }
 }
@@ -280,8 +404,15 @@ fn render_face_select(state: &GameState, lines: &mut Vec<String>) {
     for (i, &face) in state.drop_faces.iter().enumerate() {
         let kanji = face.kanji();
         let eng = face.english();
-        let marker = if i == state.face_index { format!("{}{}", BG_YELLOW, FG_BLACK) } else { String::new() };
-        lines.push(format!("  {} {} {:?} ({}) {}", marker, kanji, face, eng, RESET));
+        let marker = if i == state.face_index {
+            format!("{}{}", BG_YELLOW, FG_BLACK)
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "  {} {} {:?} ({}) {}",
+            marker, kanji, face, eng, RESET
+        ));
     }
 }
 
@@ -294,13 +425,22 @@ fn render_promote(state: &GameState, lines: &mut Vec<String>) {
     for (i, &face) in state.promote_choices.iter().enumerate() {
         let kanji = face.kanji();
         let eng = face.english();
-        let marker = if i == state.promote_index { format!("{}{}", BG_YELLOW, FG_BLACK) } else { String::new() };
-        lines.push(format!("  {} {} {:?} ({}) {}", marker, kanji, face, eng, RESET));
+        let marker = if i == state.promote_index {
+            format!("{}{}", BG_YELLOW, FG_BLACK)
+        } else {
+            String::new()
+        };
+        lines.push(format!(
+            "  {} {} {:?} ({}) {}",
+            marker, kanji, face, eng, RESET
+        ));
     }
 }
 
 fn render_log_browse(state: &GameState, lines: &mut Vec<String>) {
-    if state.move_log.is_empty() { return; }
+    if state.move_log.is_empty() {
+        return;
+    }
     let entry = &state.move_log[state.log_index];
     let snap = &entry.snapshot;
 
@@ -309,11 +449,14 @@ fn render_log_browse(state: &GameState, lines: &mut Vec<String>) {
     for p in &on_board {
         let px = p.x.unwrap();
         let py = p.y.unwrap();
-        min_x = min_x.min(px); max_x = max_x.max(px);
-        min_y = min_y.min(py); max_y = max_y.max(py);
+        min_x = min_x.min(px);
+        max_x = max_x.max(px);
+        min_y = min_y.min(py);
+        max_y = max_y.max(py);
     }
 
-    let board_map: HashMap<String, &PieceSnapshot> = on_board.iter()
+    let board_map: HashMap<String, &PieceSnapshot> = on_board
+        .iter()
         .map(|p| (format!("{},{}", p.x.unwrap(), p.y.unwrap()), *p))
         .collect();
 
@@ -327,7 +470,9 @@ fn render_log_browse(state: &GameState, lines: &mut Vec<String>) {
     // Grid header + rows
     let _start_line = lines.len();
     let mut header = "    ".to_string();
-    for x in x1..=x2 { header += &format!("{:>2}", x); }
+    for x in x1..=x2 {
+        header += &format!("{:>2}", x);
+    }
     lines.push(format!("  {}{}{}", FG_GRAY, header, RESET));
 
     let move_from = entry.from.map(|(x, y)| format!("{},{}", x, y));
@@ -363,12 +508,26 @@ fn render_log_browse(state: &GameState, lines: &mut Vec<String>) {
     let w_end = total.min(w_start + visible);
     for i in w_start..w_end {
         let e = &state.move_log[i];
-        let color = if e.owner == Owner::Black { FG_WHITE } else { FG_CYAN };
-        let ow = if e.owner == Owner::Black { t("black_short") } else { t("white_short") };
-        if i == state.log_index {
-            log_panel.push(format!("{}{}{}.{} {}{}", BG_YELLOW, FG_BLACK, e.num, ow, e.text, RESET));
+        let color = if e.owner == Owner::Black {
+            FG_WHITE
         } else {
-            log_panel.push(format!("{}{}.{} {}{}{}{} {}", FG_GRAY, e.num, RESET, color, BOLD, ow, RESET, e.text));
+            FG_CYAN
+        };
+        let ow = if e.owner == Owner::Black {
+            t("black_short")
+        } else {
+            t("white_short")
+        };
+        if i == state.log_index {
+            log_panel.push(format!(
+                "{}{}{}.{} {}{}",
+                BG_YELLOW, FG_BLACK, e.num, ow, e.text, RESET
+            ));
+        } else {
+            log_panel.push(format!(
+                "{}{}.{} {}{}{}{} {}",
+                FG_GRAY, e.num, RESET, color, BOLD, ow, RESET, e.text
+            ));
         }
     }
 
@@ -380,17 +539,28 @@ fn render_log_browse(state: &GameState, lines: &mut Vec<String>) {
         let hint = get_move_hint_lines(face, entry.owner);
         let mut gw = grid_width + left_w;
         let end = lines.len().min(board_start + hint.len());
-        for i in board_start..end { gw = gw.max(vis_len(&lines[i])); }
+        for i in board_start..end {
+            gw = gw.max(vis_len(&lines[i]));
+        }
         merge_sidebar(lines, &hint, board_start, gw);
     }
 }
 
 fn render_snap_hand(snap: &[PieceSnapshot], lines: &mut Vec<String>, owner: Owner) {
-    let hand: Vec<_> = snap.iter()
+    let hand: Vec<_> = snap
+        .iter()
         .filter(|p| p.x.is_none() && p.cube != Cube::Gyoku && p.owner == owner)
         .collect();
-    let label = if owner == Owner::Black { t("black_hand") } else { t("white_hand") };
-    let color = if owner == Owner::Black { FG_WHITE } else { FG_CYAN };
+    let label = if owner == Owner::Black {
+        t("black_hand")
+    } else {
+        t("white_hand")
+    };
+    let color = if owner == Owner::Black {
+        FG_WHITE
+    } else {
+        FG_CYAN
+    };
     let mut s = format!("  {}{}{}:{} ", color, BOLD, label, RESET);
     if hand.is_empty() {
         s += &format!("{}{}{}", FG_GRAY, t("hand_empty"), RESET);
@@ -404,7 +574,9 @@ fn render_snap_hand(snap: &[PieceSnapshot], lines: &mut Vec<String>, owner: Owne
 
 fn build_diagram(face: Face, owner: Owner) -> Vec<String> {
     let comps = get_move_components(face, owner);
-    if comps.is_empty() { return Vec::new(); }
+    if comps.is_empty() {
+        return Vec::new();
+    }
     let mut max_off: i32 = 1;
     for comp in &comps {
         for &(dx, dy) in &comp.dirs {
@@ -432,10 +604,15 @@ fn build_diagram(face: Face, owner: Owner) -> Vec<String> {
                 } else {
                     let dx = c as i32 - mid;
                     let dy = mid - r as i32;
-                    if dx == 0 { line += "| "; }
-                    else if dy == 0 { line += "--"; }
-                    else if (dx < 0 && dy > 0) || (dx > 0 && dy < 0) { line += "\\ "; }
-                    else { line += "/ "; }
+                    if dx == 0 {
+                        line += "| ";
+                    } else if dy == 0 {
+                        line += "--";
+                    } else if (dx < 0 && dy > 0) || (dx > 0 && dy < 0) {
+                        line += "\\ ";
+                    } else {
+                        line += "/ ";
+                    }
                 }
             } else {
                 line += ". ";
@@ -448,14 +625,23 @@ fn build_diagram(face: Face, owner: Owner) -> Vec<String> {
 
 fn get_move_hint_lines(face: Face, owner: Owner) -> Vec<String> {
     let comps = get_move_components(face, owner);
-    if comps.is_empty() { return Vec::new(); }
+    if comps.is_empty() {
+        return Vec::new();
+    }
     let mut result = Vec::new();
 
     let cur = build_diagram(face, owner);
     let opp = face.opposite();
     let mut header = format!("{}{}{}{:?}{}", FG_YELLOW, BOLD, face.kanji(), face, RESET);
     if let Some(opp_face) = opp {
-        header += &format!("{}  {}{}{:?}{}", FG_GRAY, t("hint_flip"), opp_face.kanji(), opp_face, RESET);
+        header += &format!(
+            "{}  {}{}{:?}{}",
+            FG_GRAY,
+            t("hint_flip"),
+            opp_face.kanji(),
+            opp_face,
+            RESET
+        );
         let opp_d = build_diagram(opp_face, owner);
         result.push(header);
         for l in side_by_side(&[cur, opp_d], "  ") {
@@ -470,13 +656,19 @@ fn get_move_hint_lines(face: Face, owner: Owner) -> Vec<String> {
 
     let promos = face.promotions();
     if !promos.is_empty() {
-        let names: Vec<String> = promos.iter()
+        let names: Vec<String> = promos
+            .iter()
             .map(|f| format!("{}{:?}", f.kanji(), f))
             .collect();
-        result.push(format!("{}{}{}{}", FG_RED, t("hint_promote"), names.join("/"), RESET));
-        let promo_diags: Vec<Vec<String>> = promos.iter()
-            .map(|f| build_diagram(*f, owner))
-            .collect();
+        result.push(format!(
+            "{}{}{}{}",
+            FG_RED,
+            t("hint_promote"),
+            names.join("/"),
+            RESET
+        ));
+        let promo_diags: Vec<Vec<String>> =
+            promos.iter().map(|f| build_diagram(*f, owner)).collect();
         for l in side_by_side(&promo_diags, "  ") {
             result.push(format!("{}{}{}", FG_RED, l, RESET));
         }
@@ -523,16 +715,23 @@ fn get_hint_for_state(state: &GameState) -> Vec<String> {
 
 fn side_by_side(diagrams: &[Vec<String>], gap: &str) -> Vec<String> {
     let max_h = diagrams.iter().map(|d| d.len()).max().unwrap_or(0);
-    let widths: Vec<usize> = diagrams.iter()
+    let widths: Vec<usize> = diagrams
+        .iter()
         .map(|d| if d.is_empty() { 0 } else { d[0].len() })
         .collect();
     let mut result = Vec::new();
     for i in 0..max_h {
-        let parts: Vec<String> = diagrams.iter().enumerate()
+        let parts: Vec<String> = diagrams
+            .iter()
+            .enumerate()
             .map(|(j, d)| {
-                if i < d.len() { d[i].clone() }
-                else { " ".repeat(widths[j]) }
-            }).collect();
+                if i < d.len() {
+                    d[i].clone()
+                } else {
+                    " ".repeat(widths[j])
+                }
+            })
+            .collect();
         result.push(parts.join(gap));
     }
     result
@@ -540,22 +739,40 @@ fn side_by_side(diagrams: &[Vec<String>], gap: &str) -> Vec<String> {
 
 fn render_tutorial(state: &GameState, lines: &mut Vec<String>) {
     let ansi = Ansi {
-        bold: BOLD, reset: RESET, fg_gray: FG_GRAY, fg_white: FG_WHITE,
-        fg_cyan: FG_CYAN, fg_green: FG_GREEN, fg_yellow: FG_YELLOW, fg_red: FG_RED,
+        bold: BOLD,
+        reset: RESET,
+        fg_gray: FG_GRAY,
+        fg_white: FG_WHITE,
+        fg_cyan: FG_CYAN,
+        fg_green: FG_GREEN,
+        fg_yellow: FG_YELLOW,
+        fg_red: FG_RED,
     };
     let pages = get_tutorial_pages(&ansi);
     let page = &pages[state.tutorial_page];
     let total = pages.len();
     let num = state.tutorial_page + 1;
-    lines.push(format!("  {}{} ({}/{}) - {}{}", BOLD, t("tut_title"), num, total, page[0], RESET));
+    lines.push(format!(
+        "  {}{} ({}/{}) - {}{}",
+        BOLD,
+        t("tut_title"),
+        num,
+        total,
+        page[0],
+        RESET
+    ));
     lines.push(String::new());
     for i in 1..page.len() {
         lines.push(format!("  {}", page[i]));
     }
     lines.push(String::new());
     let mut nav = Vec::new();
-    if num > 1 { nav.push(t("tut_prev").to_string()); }
-    if num < total { nav.push(t("tut_next").to_string()); }
+    if num > 1 {
+        nav.push(t("tut_prev").to_string());
+    }
+    if num < total {
+        nav.push(t("tut_next").to_string());
+    }
     nav.push(t("tut_back").to_string());
     lines.push(format!("  {}{}{}", FG_GRAY, nav.join("  "), RESET));
 }
@@ -566,9 +783,20 @@ fn build_log_panel(state: &GameState) -> Vec<String> {
         panel.push(format!("{}── {} ──{}", FG_GRAY, t("log_title"), RESET));
         let start = state.move_log.len().saturating_sub(8);
         for entry in &state.move_log[start..] {
-            let color = if entry.owner == Owner::Black { FG_WHITE } else { FG_CYAN };
-            let ow = if entry.owner == Owner::Black { t("black_short") } else { t("white_short") };
-            panel.push(format!("{}{}.{} {}{}{}{} {}", FG_GRAY, entry.num, RESET, color, BOLD, ow, RESET, entry.text));
+            let color = if entry.owner == Owner::Black {
+                FG_WHITE
+            } else {
+                FG_CYAN
+            };
+            let ow = if entry.owner == Owner::Black {
+                t("black_short")
+            } else {
+                t("white_short")
+            };
+            panel.push(format!(
+                "{}{}.{} {}{}{}{} {}",
+                FG_GRAY, entry.num, RESET, color, BOLD, ow, RESET, entry.text
+            ));
         }
     }
     panel
@@ -580,9 +808,10 @@ fn build_sidebar(state: &GameState) -> Vec<String> {
 
 fn get_controls_hint(state: &GameState) -> Option<Vec<String>> {
     match state.mode {
-        Mode::SetupBlackGyoku | Mode::SetupWhiteGyoku => {
-            Some(vec![t("controls_setup_1").into(), t("controls_setup_2").into()])
-        }
+        Mode::SetupBlackGyoku | Mode::SetupWhiteGyoku => Some(vec![
+            t("controls_setup_1").into(),
+            t("controls_setup_2").into(),
+        ]),
         Mode::Board => {
             if state.ai_side.is_ai(state.turn) {
                 Some(vec![
@@ -590,14 +819,21 @@ fn get_controls_hint(state: &GameState) -> Option<Vec<String>> {
                     t("controls_board_2").into(),
                 ])
             } else {
-                Some(vec![t("controls_board_1").into(), t("controls_board_2").into()])
+                Some(vec![
+                    t("controls_board_1").into(),
+                    t("controls_board_2").into(),
+                ])
             }
         }
         Mode::Selected => Some(vec![t("controls_move").into()]),
         Mode::Hand | Mode::FaceSelect => Some(vec![t("controls_list").into()]),
         Mode::DropTarget => Some(vec![t("controls_drop").into()]),
         Mode::Promote => Some(vec![t("controls_promote").into()]),
-        Mode::LogBrowse => Some(vec![format!("↑↓:{}  ESC:{}", t("log_browse_nav"), t("log_browse_back"))]),
+        Mode::LogBrowse => Some(vec![format!(
+            "↑↓:{}  ESC:{}",
+            t("log_browse_nav"),
+            t("log_browse_back")
+        )]),
         _ => None,
     }
 }
@@ -621,19 +857,42 @@ pub fn render(state: &GameState) {
 
         match state.mode {
             Mode::GameOver => {
-                let winner_name = if state.winner == Some(Owner::Black) { t("black") } else { t("white") };
-                lines.push(format!("  {}{}★ {} {} ★{}", BOLD, FG_YELLOW, winner_name, t("wins"), RESET));
+                let winner_name = if state.winner == Some(Owner::Black) {
+                    t("black")
+                } else {
+                    t("white")
+                };
+                lines.push(format!(
+                    "  {}{}★ {} {} ★{}",
+                    BOLD,
+                    FG_YELLOW,
+                    winner_name,
+                    t("wins"),
+                    RESET
+                ));
                 if !state.message.is_empty() {
                     lines.push(format!("  {}{}{}", FG_YELLOW, state.message, RESET));
                 }
                 lines.push(String::new());
-                lines.push(format!("  {}{}  Tab:{}{}", FG_GRAY, t("quit_menu"), t("log_title"), RESET));
+                lines.push(format!(
+                    "  {}{}  Tab:{}{}",
+                    FG_GRAY,
+                    t("quit_menu"),
+                    t("log_title"),
+                    RESET
+                ));
             }
             Mode::Draw => {
                 lines.push(format!("  {}{}★ {} ★{}", BOLD, FG_YELLOW, t("draw"), RESET));
                 lines.push(format!("  {}{}{}", FG_YELLOW, state.message, RESET));
                 lines.push(String::new());
-                lines.push(format!("  {}{}  Tab:{}{}", FG_GRAY, t("quit_menu"), t("log_title"), RESET));
+                lines.push(format!(
+                    "  {}{}  Tab:{}{}",
+                    FG_GRAY,
+                    t("quit_menu"),
+                    t("log_title"),
+                    RESET
+                ));
             }
             Mode::Hand => render_hand_select(state, &mut lines),
             Mode::FaceSelect => render_face_select(state, &mut lines),
@@ -653,14 +912,18 @@ pub fn render(state: &GameState) {
             let mut gw = gi.grid_width;
             if !sidebar.is_empty() {
                 let end = lines.len().min(side_start + sidebar.len());
-                for i in side_start..end { gw = gw.max(vis_len(&lines[i])); }
+                for i in side_start..end {
+                    gw = gw.max(vis_len(&lines[i]));
+                }
                 merge_sidebar(&mut lines, &sidebar, side_start, gw);
             }
             let log_panel = build_log_panel(state);
             if !log_panel.is_empty() {
                 let mut gw2 = gw;
                 let log_end = lines.len().min(side_start + log_panel.len());
-                for i in side_start..log_end { gw2 = gw2.max(vis_len(&lines[i])); }
+                for i in side_start..log_end {
+                    gw2 = gw2.max(vis_len(&lines[i]));
+                }
                 merge_sidebar(&mut lines, &log_panel, side_start, gw2);
             }
         }
