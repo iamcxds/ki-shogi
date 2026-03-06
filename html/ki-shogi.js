@@ -1831,7 +1831,7 @@ function render() {
 
   // For menu/tutorial, use fixed size
   if (state.mode === MODE.MENU || state.mode === MODE.TUTORIAL) {
-    const totalW = 520,
+    const totalW = 550,
       totalH = 420;
     canvas.style.width = totalW + "px";
     canvas.style.height = totalH + "px";
@@ -1935,7 +1935,7 @@ function render() {
     rows = maxY - minY + 1;
   const boardW = cols * CELL,
     boardH = rows * CELL;
-  const totalW = Math.max(520, 30 + boardW + sideW );
+  const totalW = Math.max(550, 30 + boardW + sideW );
   const totalH = headerH + handH + 8 + Math.max( sideH+logH ,boardH + 8 + handH + statusH)+  footerH;
 
   canvas.style.width = totalW + "px";
@@ -2335,7 +2335,7 @@ function getTutorialPages() {
     ],
     [
       "Dropping Pieces",
-      "Press D to enter drop mode.",
+      "Press D or click board to enter drop mode.",
       "Choose a hand piece → choose face → choose position.",
       "",
       [
@@ -3602,5 +3602,4 @@ function handleCellClick(x, y) {
 canvas = document.getElementById("c");
 ctx = canvas.getContext("2d");
 setupInput();
-canvas.focus();
 redraw();
